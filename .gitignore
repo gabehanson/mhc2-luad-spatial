@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------
+# ceiba / spatial-methods-paper .gitignore
+# ---------------------------------------------------------------
+
+# ---- Data (never commit raw or processed data) ----
+data/
+*.h5ad
+*.h5
+*.loom
+*.zarr
+*.csv
+*.tsv
+*.parquet
+*.feather
+
+# ---- Outputs (regeneratable — commit selectively) ----
+# Uncomment the lines below if you want to exclude outputs entirely.
+# By default we track outputs/ so figures are versioned with the paper.
+# outputs/
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+# nbstripout handles output stripping — but this catches any stragglers
+*.ipynb_checkpoints
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-wheel-metadata/
+
+# ---- Virtual environments ----
+.env
+.venv
+env/
+venv/
+*.conda
+.conda/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- IDEs ----
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ---- Secrets / config overrides ----
+*.env
+secrets.yml
+local_config.yml           # use this for machine-specific path overrides
+                           # paths_config.yml is committed; local_config.yml is not
+
+# ---- Large files / temp ----
+*.log
+*.tmp
+*.bak
+*.swp
+~$*

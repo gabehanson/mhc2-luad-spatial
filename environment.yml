@@ -1,0 +1,48 @@
+name: ceiba
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  - python=3.12
+
+  # ---- core data ----
+  - numpy
+  - pandas
+
+  # ---- single-cell / spatial ----
+  - anndata
+  - scanpy
+  - squidpy
+
+  # ---- ml / stats ----
+  - scikit-learn
+  - scipy
+
+  # ---- visualization ----
+  - matplotlib
+  - seaborn
+
+  # ---- utilities ----
+  - tqdm
+  - pathlib                             # stdlib in 3.12 but explicit for clarity
+  - pyyaml                              # for reading paths_config.yml
+  - glob2                               # glob with recursive support
+
+  # ---- notebook tooling ----
+  - jupyter
+  - jupyterlab
+  - nbstripout                          # strip outputs before git commits
+
+  # ---- dev / code quality ----
+  - black
+  - isort
+  - pytest
+
+  # ---- pip-only packages ----
+  - pip
+  - pip:
+    - utag                              # not on conda — install via pip
+    - pyopls                            # OPLS implementation
+    - ceiba                             # install local package in editable mode: pip install -e .
