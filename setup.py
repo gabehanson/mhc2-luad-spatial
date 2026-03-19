@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="ceiba",
     version="0.1.0",
-    author="Gabe Hanson",
+    author="Gabriel Hanson",
     author_email="",                        # add if desired
     description="Spatial transcriptomics methods for spatial analysis pipelines",
     long_description=open("README.md").read(),
