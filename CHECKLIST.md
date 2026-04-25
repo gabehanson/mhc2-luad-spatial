@@ -71,7 +71,13 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/cosmx/*.ipynb
 
 ---
 
-## 8. Final repo hygiene
+## 8. Write up download_instructions.md or data/cbioportal_query.md
+
+- [ ] description on how to querry the orien data used here
+
+---
+
+## 9. Final repo hygiene
 
 - [ ] Tag a release matching paper submission: `git tag v1.0.0-submission`
 - [ ] Confirm `.gitignore` is catching all large data files
@@ -79,7 +85,7 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/cosmx/*.ipynb
 
 ---
 
-## 9. Make repository public
+## 10. Make repository public
 
 - [ ] After acceptance or at preprint submission
 - [ ] Update README with DOI and citation once available
