@@ -1,0 +1,94 @@
+# paths_config.yml
+# ---------------------------------------------------------------
+# Central configuration for all external data locations.
+# This file is committed to the repo — actual data is NOT.
+#
+# HOW TO USE:
+#   from pathlib import Path
+#   import yaml
+#   with open("paths_config.yml") as f:
+#       cfg = yaml.safe_load(f)
+#
+# For reviewers / collaborators:
+#   Update repo_root and data paths below to match your machine.
+# ---------------------------------------------------------------
+
+repo_root: "/home/gh8sj/projects/mhc2-luad-paper"
+
+# ---------------------------------------------------------------
+# Datasets
+# ---------------------------------------------------------------
+datasets:
+  cosmx:
+    rds: "/scratch/gh8sj/CosMx/LungADGabeResegmentation_30_04_2026_16_10_31_881"
+    extracted: "/scratch/gh8sj/CosMx/extracted_csvs"
+    raw: "/scratch/gh8sj/CosMx/extracted_csvs"
+    gene_annotations: "data/cosmx_genes_not_in_salcher_reference.csv"
+    pathway_annotations: "data/cosmx_pathway_annotations.csv"
+    gene_conversion_list: "data/cosmx_gene_probe_details.csv"
+    metadata: "/project/Dolatshahi_Lab/Gabe_Hanson/data/cosmx/lung_tma/data/metadata/cosmx_metadata.csv"
+    
+  tma_s100p:
+    raw: "/project/Dolatshahi_Lab/Gabe_Hanson/data/mhc2_vectra_data/btf_s100p/tma_s100p_object_data.csv"
+    description: "Cell-level HALO export, 4-plex TMA (DAPI/PanCK/MHC II/S100P), Hamamatsu NanoZoomer"
+
+  patient_classifications:
+    raw: "/home/gh8sj/data/CosMx/patient_mhc_ii_classifications.csv"
+    description: "IHC-based MHC II classification per patient (positive/negative/mixed)"
+
+  salcher_atlas:
+    raw: "/project/Dolatshahi_Lab/Gabe_Hanson/data/sc_data/salcher_sc_data/local.h5ad"
+    cosmx_subset: "/scratch/gh8sj/CosMx/salcher_cosmx_gene_set.h5ad"
+    description: "Salcher et al. pan-cancer scRNA-seq atlas (LUAD subset used for tumor vs NAT comparison)"
+
+  luad:
+    processed: "outputs/processed/luad.h5ad"
+    description: "All LUAD cells, all cell types, tumor_primary + normal_adjacent"
+    
+  luad_epithelial:
+    processed: "outputs/processed/luad_epithelial_harmony.h5ad"
+    description: "LUAD epithelial lineage cells with Harmony-corrected UMAP"
+    
+  lusc_luad:
+    processed: "outputs/processed/lusc_luad.h5ad"
+    description: "LUAD + LUSC cells for cross-histology comparisons"
+
+  luad_mhc2_classified:
+    processed: "outputs/processed/luad_mhc2_classified.h5ad"
+    description: "Full LUAD AnnData with MHC2_clustering label in obs (High/Low/Excluded)"
+
+  orien:
+    root: "/project/Dolatshahi_Lab/Gabe_Hanson/data/orien_data/data/mhc2_paper"
+    expression: "mRNA expression (RNA Seq V2 RSEM).txt"
+    survival: "overall_survival.txt"
+    age_tmb: "age_metas.txt"
+    sex_treatment: "immunotherapy_vs_sex.txt"
+    cancer_type_stage: "cancer_type_vs_stage.txt"
+    tmb_msi: "tmb_microsatelite.txt"
+    mutations:
+      ros1_egfr: "ros1_egfr.txt"
+      alk_braf: "alk_braf.txt"
+      met_ret: "met_ret.txt"
+      kras_tp53: "kras_tp53.txt"
+    description: "ORIEN Avatar LUAD cohort — see data/cbioportal_query.md for download instructions"
+
+  uva_cohort:
+    root: "/home/gh8sj/bin/cohort1"
+    clinical: "All_DATA_NSCLC.csv"
+    description: "UVA LUAD cohort — clinical metadata, IHC MHC II classifications"
+
+# ---------------------------------------------------------------
+# Outputs (relative to repo_root)
+# ---------------------------------------------------------------
+outputs:
+  figures: "outputs/figures"
+  supplemental: "outputs/figures"   # supp figures live alongside main figures, organized by figureS# subfolder
+  tables: "outputs/tables"
+  processed: "outputs/processed"
+
+# ---------------------------------------------------------------
+# References
+# ---------------------------------------------------------------
+references:
+  gene_lists: ""
+  annotations: ""

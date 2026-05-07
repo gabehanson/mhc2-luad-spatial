@@ -1,0 +1,29 @@
+gene,annotation
+ADIPOQ,"AdipoQ — adipokine, not in Salcher atlas"
+ATP5F1E,ATP synthase F1 subunit epsilon — not in atlas
+CALB1,Calbindin 1 — not in atlas
+CIDEA,Cell death-inducing DFFA-like effector A — mammary-specific; CIDEB and CIDEC present
+CRP,C-reactive protein — not in atlas
+CSHL1,Chorionic somatomammotropin hormone-like 1 — mammary-related
+GC,Vitamin D-binding protein — not in atlas
+GCG,Glucagon — not expected in lung
+GPX1,"Glutathione peroxidase 1 — GPX 2,3,4,7,8 present"
+INS,Insulin — not expected in lung
+KLK3,Prostate-specific antigen — not expected in lung
+KRT20,Keratin 20 — GI-specific; 18 other keratin genes present
+MYH6,Myosin heavy chain alpha — cardiac muscle specific
+MYL7,Atrial myosin regulatory light chain — cardiac atria specific
+PRTN3,Proteinase 3 — mainly neutrophil granulocytes
+PTPRCAP,Protein tyrosine phosphatase type C-associated protein — not in atlas
+QRFPR,Pyroglutamylated RFamide peptide receptor — mainly brain
+REG1A,Pancreatic stone protein — not in atlas
+SST,Somatostatin — not in atlas
+TTR,Transthyretin — not in atlas
+VEGFD,"C-fos-induced growth factor — VEGFA, B, C present"
+LINC01781,Long non-coding RNA — lncRNA naming not in reference
+LINC01857,Long non-coding RNA — lncRNA naming not in reference
+LINC02446,Long non-coding RNA — lncRNA naming not in reference
+BBLN,Alias for C9orf16 — present in atlas under canonical name
+RGS5,Present in atlas as RGS5_ENSG00000143248
+IFNA1/13,Multi-gene probe — IFN-alpha subtypes; naming convention not in reference
+IFNL2/3,Multi-gene probe — IFN-lambda subtypes; naming convention not in reference

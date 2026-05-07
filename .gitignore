@@ -1,10 +1,8 @@
 # ---------------------------------------------------------------
 # ceiba / spatial-methods-paper .gitignore
 # ---------------------------------------------------------------
-
 # ---- Data (never commit raw or processed data) ----
-data/
-*.h5ad
+data/*.h5ad
 *.h5
 *.loom
 *.zarr
@@ -12,6 +10,13 @@ data/
 *.tsv
 *.parquet
 *.feather
+
+# Exception: small reference files in data/ that should be committed
+!data/paths_config.yml
+!data/cosmx_gene_probe_details.csv
+!data/cosmx_pathway_annotations.csv
+!data/cosmx_genes_not_in_salcher_reference.csv
+!data/cbioportal_query.md
 
 # ---- Outputs (regeneratable — commit selectively) ----
 # Uncomment the lines below if you want to exclude outputs entirely.
