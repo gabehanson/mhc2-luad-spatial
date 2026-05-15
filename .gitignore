@@ -10,6 +10,9 @@ data/*.h5ad
 *.tsv
 *.parquet
 *.feather
+claude_CONTEXT.md
+**/claude_CONTEXT.md
+**/cosmx_context.md
 
 # Exception: small reference files in data/ that should be committed
 !data/paths_config.yml
@@ -22,6 +25,7 @@ data/*.h5ad
 # Uncomment the lines below if you want to exclude outputs entirely.
 # By default we track outputs/ so figures are versioned with the paper.
 # outputs/
+outputs/tables/figure3/*_single_cell.csv
 
 # ---- Jupyter ----
 .ipynb_checkpoints/

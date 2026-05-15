@@ -54,9 +54,10 @@ datasets:
     description: "LUAD + LUSC cells for cross-histology comparisons"
 
   luad_mhc2_classified:
-    processed: "outputs/processed/luad_mhc2_classified.h5ad"
-    description: "Full LUAD AnnData with MHC2_clustering label in obs (High/Low/Excluded)"
-
+    #processed: "outputs/processed/luad_mhc2_classified.h5ad"
+      processed: "/scratch/gh8sj/salcher_sc_data/cancer_cells_mhc2_classification.h5ad"
+      description: "Full LUAD AnnData with MHC2_clustering label in obs (High/Low/Excluded)"
+  
   orien:
     root: "/project/Dolatshahi_Lab/Gabe_Hanson/data/orien_data/data/mhc2_paper"
     expression: "mRNA expression (RNA Seq V2 RSEM).txt"
