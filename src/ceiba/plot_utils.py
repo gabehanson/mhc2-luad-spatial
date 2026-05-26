@@ -62,6 +62,10 @@ def draw_boxstrip_panel(
     point_size=18,
     point_alpha=0.8,
     box_width=0.35,
+    title_fontsize=10,
+    label_fontsize=10,
+    tick_fontsize=9,
+    pval_fontsize=9,
 ):
     """
     Draw a single unfilled boxplot + stripplot panel on a log y-axis.
@@ -73,32 +77,41 @@ def draw_boxstrip_panel(
     Parameters
     ----------
     ax : matplotlib.axes.Axes
+        Axes object to draw into.
     neg : array-like
         Values for the negative/reference group.
     pos : array-like
         Values for the positive/comparison group.
     pval : float
-        Pre-computed Mann-Whitney p-value to annotate.
+        Pre-computed p-value to annotate (raw or FDR-adjusted).
     neg_color : str
         Hex color for the negative group.
     pos_color : str
         Hex color for the positive group.
     neg_label : str
-        X-axis tick label for negative group.
+        X-axis tick label for the negative group.
     pos_label : str
-        X-axis tick label for positive group.
+        X-axis tick label for the positive group.
     title : str or None
-        Axes title.
+        Axes title. Pass None to suppress.
     ylabel : str or None
         Y-axis label. Pass None to suppress (e.g. for non-leftmost panels).
     jitter_width : float
-        Half-width of uniform jitter applied to strip points.
+        Half-width of uniform horizontal jitter applied to strip points.
     point_size : float
         Marker size for strip points.
     point_alpha : float
-        Alpha for strip points.
+        Alpha transparency for strip points.
     box_width : float
         Width of boxplot boxes.
+    title_fontsize : int
+        Font size for the panel title.
+    label_fontsize : int
+        Font size for the y-axis label.
+    tick_fontsize : int
+        Font size for x- and y-axis tick labels.
+    pval_fontsize : int
+        Font size for the p-value annotation text.
     """
     bp = ax.boxplot(
         [neg, pos],
@@ -133,19 +146,21 @@ def draw_boxstrip_panel(
 
     ax.set_yscale('log')
     ax.set_xticks([0, 1])
-    ax.set_xticklabels([neg_label, pos_label])
+    ax.set_xticklabels([neg_label, pos_label], fontsize=tick_fontsize)
+    ax.tick_params(axis='y', labelsize=tick_fontsize)
     ax.text(
         0.5, 0.97,
         f'p = {pval:.2e} ({sig_label(pval)})',
         transform=ax.transAxes,
         ha='center', va='top',
+        fontsize=pval_fontsize,
     )
     ax.spines[['top', 'right']].set_visible(False)
 
     if title is not None:
-        ax.set_title(title, pad=6)
+        ax.set_title(title, pad=6, fontsize=title_fontsize, wrap=True)
     if ylabel is not None:
-        ax.set_ylabel(ylabel)
+        ax.set_ylabel(ylabel, fontsize=label_fontsize)
 
 
 def make_comparison_figure(
@@ -160,12 +175,20 @@ def make_comparison_figure(
     panel_size=(3.5, 5),
     outpath=None,
     dpi=300,
+    pval_map=None,
+    title_fontsize=10,
+    label_fontsize=10,
+    tick_fontsize=9,
+    pval_fontsize=9,
 ):
     """
     Build a multi-panel comparison figure for a list of cell phenotypes.
 
     One panel per cell type. Y-axis limits are shared across all panels.
     The leftmost panel in each row gets a y-axis label; others are suppressed.
+    If pval_map is provided, those values are used for significance annotation
+    instead of running internal Mann-Whitney U tests — pass FDR-adjusted
+    p-values here when multiple comparisons are being made.
 
     Parameters
     ----------
@@ -181,17 +204,29 @@ def make_comparison_figure(
     classification_col : str
         Column identifying patient group.
     neg_color : str
-        Hex color for negative group.
+        Hex color for the negative group.
     pos_color : str
-        Hex color for positive group.
+        Hex color for the positive group.
     ncols : int
         Number of columns in the figure grid.
     panel_size : tuple of (float, float)
         Width and height of each panel in inches.
-    outpath : str or None
+    outpath : str or Path or None
         If provided, save figure to this path as PDF.
     dpi : int
         DPI for raster outputs.
+    pval_map : dict or None
+        Pre-computed p-values keyed by cell type name. If provided, these
+        are used for significance annotation instead of running internal
+        Mann-Whitney U tests. Intended for FDR-adjusted p-values.
+    title_fontsize : int
+        Font size for panel titles.
+    label_fontsize : int
+        Font size for axis labels.
+    tick_fontsize : int
+        Font size for tick labels.
+    pval_fontsize : int
+        Font size for p-value annotation text.
 
     Returns
     -------
@@ -222,7 +257,11 @@ def make_comparison_figure(
         col = f'{ct}_fraction'
         neg = plot_df.loc[plot_df[classification_col] == neg_label, col].dropna().values
         pos = plot_df.loc[plot_df[classification_col] == pos_label, col].dropna().values
-        _, pval = mannwhitneyu(neg, pos, alternative='two-sided')
+
+        if pval_map is not None:
+            pval = pval_map.get(ct, np.nan)
+        else:
+            _, pval = mannwhitneyu(neg, pos, alternative='two-sided')
 
         ylabel = 'Fraction of total cells' if (i % ncols == 0) else None
         title = ct.replace(' Cells', '')
@@ -233,10 +272,13 @@ def make_comparison_figure(
             pos_color=pos_color,
             title=title,
             ylabel=ylabel,
+            title_fontsize=title_fontsize,
+            label_fontsize=label_fontsize,
+            tick_fontsize=tick_fontsize,
+            pval_fontsize=pval_fontsize,
         )
         ax.set_ylim(ymin, ymax)
 
-    # hide any unused panels
     for ax in axes[len(cell_types):]:
         ax.set_visible(False)
 
