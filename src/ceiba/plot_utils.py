@@ -180,6 +180,8 @@ def make_comparison_figure(
     label_fontsize=10,
     tick_fontsize=9,
     pval_fontsize=9,
+    point_alpha=0.8,
+    ylabel='Fraction of total cells',
 ):
     """
     Build a multi-panel comparison figure for a list of cell phenotypes.
@@ -263,7 +265,7 @@ def make_comparison_figure(
         else:
             _, pval = mannwhitneyu(neg, pos, alternative='two-sided')
 
-        ylabel = 'Fraction of total cells' if (i % ncols == 0) else None
+        ylabel_label = ylabel if (i % ncols == 0) else None
         title = ct.replace(' Cells', '')
 
         draw_boxstrip_panel(
@@ -276,6 +278,7 @@ def make_comparison_figure(
             label_fontsize=label_fontsize,
             tick_fontsize=tick_fontsize,
             pval_fontsize=pval_fontsize,
+            point_alpha=point_alpha,
         )
         ax.set_ylim(ymin, ymax)
 
@@ -493,3 +496,113 @@ def plot_scrna_group_comparison(
         fig.savefig(save_path, dpi=dpi, bbox_inches='tight')
         print(f'Saved → {save_path}')
     plt.show()
+
+
+def plot_forest(results_df, fig_path=None, title=None, row_height=0.7,region_colors=None,legend_anchor=(1.02, 0)):
+    """
+    Forest plot of mixed effects model coefficients with 95% CI.
+
+    Parameters
+    ----------
+    results_df : pd.DataFrame
+        Output of run_mixed_effects with Coefficient, Std Error,
+        FDR-adjusted P-value columns.
+    fig_path : Path or None
+        Output PDF path.
+    title : str or None
+        Figure title.
+    region_colors : dict or None
+        Mapping of region name to color. If None, uses default colors.
+    """
+        
+    df = results_df.copy()
+
+    # clean up labels
+    df['label'] = (
+        df['Cell Type']
+        .str.replace(r'^(tumor|stroma|alveoli): ', '', regex=True)
+        .str.replace(' Cells', '', regex=False)
+    )
+    df['region'] = df['Cell Type'].str.extract(r'^(tumor|stroma|alveoli)')
+    df['ci95'] = 1.96 * df['Std Error']
+    df['significant'] = df['FDR-adjusted P-value'] < 0.05
+
+    # sort by region then coefficient
+    region_order = {'tumor': 0, 'stroma': 1, 'alveoli': 2}
+    df['region_order'] = df['region'].map(region_order)
+    df = df.sort_values(['region_order', 'Coefficient'], ascending=[True, False])
+
+    if region_colors is None:
+        region_colors = {
+            'tumor':   '#9DD9D2FF',
+            'stroma':  '#046E8FFF',
+            'alveoli': '#D44D5CFF',
+        }
+
+    fig, ax = plt.subplots(figsize=(7, len(df) * row_height + 1))
+
+    for i, (_, row) in enumerate(df.iterrows()):
+        color = region_colors.get(row['region'], 'gray')
+        marker = 'o' if row['significant'] else 'o'
+        fill = color if row['significant'] else 'none'
+
+        ax.errorbar(
+            row['Coefficient'], i,
+            xerr=row['ci95'],
+            fmt='none',
+            color=color,
+            capsize=3, lw=1.2,
+        )
+        ax.scatter(
+            row['Coefficient'], i,
+            color=color,
+            facecolors=fill,
+            edgecolors=color,
+            s=60, zorder=3,
+            linewidths=1.2,
+        )
+
+    ax.axvline(0, color='gray', linestyle='--', lw=1, alpha=0.7)
+    
+    # direction labels
+    xlim = ax.get_xlim()
+    ax.text(1.0, -0.12, 'Higher in MHC II high →',
+            ha='right', va='top', fontsize=9, color='gray', style='italic',
+            transform=ax.transAxes)
+    ax.text(0.0, -0.12, '← Higher in MHC II low',
+            ha='left', va='top', fontsize=9, color='gray', style='italic',
+            transform=ax.transAxes)
+    ax.set_yticks(range(len(df)))
+    ax.set_yticklabels(df['label'], fontsize=9)
+    ax.set_xlabel('Coefficient (log10 cells/mm², class II high vs low)', fontsize=10)
+    ax.invert_yaxis()
+
+    if title:
+        ax.set_title(title, fontsize=11)
+
+    # region legend
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w',
+               markerfacecolor=region_colors[r], markersize=8, label=r)
+        for r in ['tumor', 'stroma', 'alveoli']
+    ]
+    legend_elements += [
+        Line2D([0], [0], marker='o', color='gray',
+               markerfacecolor='gray', markersize=8, label='FDR < 0.05'),
+        Line2D([0], [0], marker='o', color='gray',
+               markerfacecolor='none', markersize=8, label='ns'),
+    ]
+    ax.legend(handles=legend_elements,
+              loc='lower right',
+              bbox_to_anchor=legend_anchor,
+              frameon=False, fontsize=9)
+
+    sns.despine(ax=ax)
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)
+
+    if fig_path is not None:
+        plt.savefig(fig_path, bbox_inches='tight')
+
+    return fig
