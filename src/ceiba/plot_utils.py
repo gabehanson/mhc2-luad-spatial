@@ -20,10 +20,14 @@ fig, axes = make_comparison_figure(
 )
 """
 
+import anndata as ad
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import mannwhitneyu
+from matplotlib.lines import Line2D
+from scipy.stats import mannwhitneyu, wilcoxon
 
 
 def sig_label(p):
@@ -605,4 +609,833 @@ def plot_forest(results_df, fig_path=None, title=None, row_height=0.7,region_col
     if fig_path is not None:
         plt.savefig(fig_path, bbox_inches='tight')
 
+    return fig
+
+# -------------------------------------------------------------------------
+# Helper functions — paired expression plots for scRNA-seq data
+# plot_genes_paired_luad and plot_genes_paired_luad_percent_detected
+# are defined here pending migration to ceiba.plot_utils
+# plot_scrna_group_comparison is defined here as it will be used
+# for figures 2c, 2d, and supplemental comparisons
+# -------------------------------------------------------------------------
+
+def plot_genes_paired_luad(
+    adata,
+    genes,
+    palette=('tab:grey', 'tab:red'),
+    celltype='Epithelial cell',
+    figsize_per_gene=(6, 5),
+    nrows=1,
+    test_mode='nonparametric',
+    return_stats=False,
+    title='',
+    save_path=None,
+):
+    """
+    Plot paired tumor vs normal adjacent expression for a list of genes.
+
+    Supports any cell type in ann_coarse. For epithelial cells, tumor cells
+    are restricted to ann_fine == 'Cancer cells' to exclude non-malignant
+    epithelial cells in the tumor_primary compartment. For all other cell
+    types, all cells of that type in tumor_primary are included.
+
+    Only donors with both origins represented are included (paired design).
+    Statistical test is selected based on test_mode — nonparametric (Wilcoxon)
+    is recommended for consistency across genes.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Atlas object. Subsetting to celltype and LUAD is performed internally.
+    genes : list of str
+        Gene symbols to plot (matched via var['feature_name']).
+    palette : tuple
+        Colors for (normal, tumor).
+    celltype : str
+        ann_coarse label to subset to (e.g. 'Epithelial cell',
+        'Macrophage/Monocyte').
+    figsize_per_gene : tuple
+        (width, height) per panel.
+    nrows : int
+        Number of rows in the figure grid.
+    test_mode : str
+        'nonparametric' — Wilcoxon signed-rank (default, recommended).
+        'parametric'    — paired t-test.
+        'auto'          — Shapiro-Wilk normality test per gene, then select.
+    return_stats : bool
+        If True, return a DataFrame of per-gene statistics.
+    title : str
+        Optional figure-level title.
+    save_path : Path or str
+        If provided, save figure to this path.
+    """
+    from scipy.stats import shapiro, wilcoxon, ttest_rel
+
+    # subset to LUAD and selected cell type
+    sub = adata[
+        (adata.obs['ann_coarse'] == celltype) &
+        (adata.obs['disease'].astype(str).str.lower().str.replace('_', ' ')
+         == 'lung adenocarcinoma')
+    ].copy()
+    sub.obs['origin']   = sub.obs['origin'].astype(str).str.strip().str.lower()
+    sub.obs['ann_fine'] = sub.obs['ann_fine'].astype(str).str.strip().str.lower()
+
+    normal_cells = sub[sub.obs['origin'] == 'normal_adjacent'].copy()
+
+    # for epithelial cells restrict tumor subset to malignant cells only
+    # for all other cell types include all cells of that type in tumor_primary
+    if 'epithelial' in celltype.lower():
+        tumor_cells = sub[
+            (sub.obs['origin'] == 'tumor_primary') &
+            (sub.obs['ann_fine'] == 'cancer cells')
+        ].copy()
+    else:
+        tumor_cells = sub[sub.obs['origin'] == 'tumor_primary'].copy()
+
+    sub = ad.concat([normal_cells, tumor_cells], axis=0, merge='same')
+
+    ncols     = int(np.ceil(len(genes) / nrows))
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols,
+        figsize=(figsize_per_gene[0] * ncols, figsize_per_gene[1] * nrows),
+        sharey=False,
+    )
+    axes = np.ravel(axes)
+
+    stats_list = []
+
+    for ax, gene in zip(axes, genes):
+        try:
+            gene_id = sub.var.loc[sub.var['feature_name'] == gene].index[0]
+        except IndexError:
+            print(f'{gene} not found in var["feature_name"] — skipping')
+            ax.axis('off')
+            continue
+
+        x = sub[:, gene_id].X
+        x = x.toarray().ravel() if hasattr(x, 'toarray') else np.asarray(x).ravel()
+
+        df = (
+            pd.DataFrame({
+                'donor_id': sub.obs['donor_id'].astype(str).values,
+                'origin':   sub.obs['origin'].values,
+                gene:       x,
+            })
+            .groupby(['donor_id', 'origin'], observed=True)[gene]
+            .mean()
+            .reset_index()
+        )
+
+        donor_counts  = df.groupby('donor_id')['origin'].nunique()
+        paired_donors = donor_counts[donor_counts == 2].index
+        df = df[df['donor_id'].isin(paired_donors)]
+        if df.empty:
+            print(f'No paired donors for {gene} — skipping')
+            ax.axis('off')
+            continue
+
+        order = ['normal_adjacent', 'tumor_primary']
+
+        sns.violinplot(
+            data=df, x='origin', y=gene, hue='origin',
+            order=order, palette=palette,
+            inner=None, linewidth=1.2, cut=0, fill=False,
+            ax=ax, legend=False,
+        )
+        sns.stripplot(
+            data=df, x='origin', y=gene, hue='origin',
+            order=order, palette=palette,
+            dodge=False, size=6, alpha=0.7,
+            ax=ax, legend=False,
+        )
+
+        normal_vals, tumor_vals = [], []
+        for did, vals in df.groupby('donor_id'):
+            norm_val  = vals.loc[vals['origin'] == 'normal_adjacent', gene].values[0]
+            tumor_val = vals.loc[vals['origin'] == 'tumor_primary',   gene].values[0]
+            ax.plot([0, 1], [norm_val, tumor_val], color='gray', alpha=0.4, linewidth=0.8)
+            normal_vals.append(norm_val)
+            tumor_vals.append(tumor_val)
+
+        diff   = np.array(tumor_vals) - np.array(normal_vals)
+        p_norm = np.nan
+
+        if test_mode == 'auto':
+            if len(diff) >= 3:
+                _, p_norm = shapiro(diff)
+            if np.isnan(p_norm) or p_norm <= 0.05:
+                test_name, (stat, p) = 'Wilcoxon', wilcoxon(tumor_vals, normal_vals)
+            else:
+                test_name, (stat, p) = 'Paired t-test', ttest_rel(tumor_vals, normal_vals)
+        elif test_mode == 'parametric':
+            test_name, (stat, p) = 'Paired t-test', ttest_rel(tumor_vals, normal_vals)
+        elif test_mode == 'nonparametric':
+            test_name, (stat, p) = 'Wilcoxon', wilcoxon(tumor_vals, normal_vals)
+        else:
+            raise ValueError("test_mode must be 'auto', 'parametric', or 'nonparametric'")
+
+        star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
+        ymax  = df[gene].max()
+        yoff  = (df[gene].max() - df[gene].min()) * 0.15
+        ax.text(0.5, ymax + yoff, star, ha='center', va='bottom',
+                fontsize=28, fontweight='bold')
+        ax.set_ylim(top=ymax + yoff * 2)
+        ax.set_title(gene)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(['Normal\nAdjacent', 'Primary\nTumor'])
+        ax.set_xlabel('')
+        ax.set_ylabel('Mean expression' if ax == axes[0] else '')
+        ax.spines[['top', 'right']].set_visible(False)
+
+        stats_list.append({
+            'Gene':         gene,
+            'n_pairs':      len(diff),
+            'Normality_p':  p_norm,
+            'Test':         test_name,
+            'Stat':         stat,
+            'p_value':      p,
+        })
+
+    for ax in axes[len(genes):]:
+        ax.set_visible(False)
+
+    if title:
+        fig.suptitle(title, fontsize=24, fontweight='bold', y=1.03)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f'Saved → {save_path}')
+    plt.show()
+
+    if return_stats:
+        return pd.DataFrame(stats_list)
+
+
+def plot_genes_paired_luad_percent_detected(
+    adata,
+    genes,
+    palette=('tab:grey', 'tab:red'),
+    celltype='Epithelial cell',
+    detection_thresh=0.0,
+    figsize_per_gene=(6, 5),
+    return_stats=False,
+    save_path=None,
+):
+    """
+    Plot the percent of cells per sample with detected expression (> detection_thresh)
+    for each gene, comparing normal adjacent vs primary tumor in paired LUAD donors.
+
+    Complements plot_genes_paired_luad — percent detection is robust to zero-inflation
+    and captures the binary presence/absence signal independently of mean expression level.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Full atlas object. Subsetting is performed internally.
+    genes : list of str
+        Gene symbols to plot (matched via var['feature_name']).
+    palette : tuple
+        Colors for (normal, tumor).
+    celltype : str
+        ann_coarse label to subset to.
+    detection_thresh : float
+        Cells with expression > this value are counted as detected (default 0.0).
+    figsize_per_gene : tuple
+        (width, height) per panel.
+    return_stats : bool
+        If True, return a DataFrame of per-gene statistics.
+    save_path : Path or str
+        If provided, save figure to this path.
+    """
+    from scipy.stats import wilcoxon
+
+    n_genes = len(genes)
+    fig, axes = plt.subplots(
+        nrows=1, ncols=n_genes,
+        figsize=(figsize_per_gene[0] * n_genes, figsize_per_gene[1]),
+        sharey=False,
+    )
+    axes = np.atleast_1d(axes).flatten()
+
+    stats_list = []
+
+    for ax, gene in zip(axes, genes):
+        epi = adata[adata.obs['ann_coarse'] == celltype].copy()
+        epi = epi[
+            epi.obs['disease'].astype(str).str.lower().str.replace('_', ' ')
+            == 'lung adenocarcinoma'
+        ].copy()
+        epi.obs['origin'] = epi.obs['origin'].astype(str).str.strip().str.lower()
+
+        normal_epi = epi[epi.obs['origin'] == 'normal_adjacent'].copy()
+        tumor_epi  = epi[
+            (epi.obs['origin'] == 'tumor_primary') &
+            (epi.obs['ann_fine'].astype(str).str.lower() == 'cancer cells')
+        ].copy()
+        epi = ad.concat([normal_epi, tumor_epi], axis=0, merge='same')
+
+        try:
+            gene_id = epi.var.loc[epi.var['feature_name'] == gene].index[0]
+        except IndexError:
+            print(f'{gene} not found in var["feature_name"] — skipping')
+            ax.axis('off')
+            continue
+
+        x = epi[:, gene_id].X
+        x = x.toarray().ravel() if hasattr(x, 'toarray') else np.asarray(x).ravel()
+
+        # fraction of cells per sample with detected expression
+        df = (
+            pd.DataFrame({
+                'donor_id': epi.obs['donor_id'].astype(str).values,
+                'sample':   epi.obs['sample'].astype(str).values,
+                'origin':   epi.obs['origin'].values,
+                'detected': (x > detection_thresh).astype(int),
+            })
+            .groupby(['donor_id', 'sample', 'origin'], observed=True)['detected']
+            .mean()
+            .mul(100.0)
+            .reset_index()
+            .rename(columns={'detected': 'pct_detected'})
+        )
+
+        donor_counts  = df.groupby('donor_id')['origin'].nunique()
+        paired_donors = donor_counts[donor_counts == 2].index
+        df = df[df['donor_id'].isin(paired_donors)]
+        if df.empty:
+            ax.axis('off')
+            continue
+
+        order = ['normal_adjacent', 'tumor_primary']
+
+        sns.violinplot(
+            data=df, x='origin', y='pct_detected', hue='origin',
+            order=order, palette=palette,
+            inner=None, linewidth=1.2, cut=0, fill=False,
+            ax=ax, legend=False,
+        )
+        sns.stripplot(
+            data=df, x='origin', y='pct_detected', hue='origin',
+            order=order, palette=palette,
+            dodge=False, size=8, alpha=0.7,
+            ax=ax, legend=False,
+        )
+
+        tumor_vals, normal_vals = [], []
+        for did, vals in df.groupby('donor_id'):
+            if set(order).issubset(set(vals['origin'].values)):
+                norm_val  = vals.loc[vals['origin'] == 'normal_adjacent', 'pct_detected'].values[0]
+                tumor_val = vals.loc[vals['origin'] == 'tumor_primary',   'pct_detected'].values[0]
+                ax.plot([0, 1], [norm_val, tumor_val], color='gray', alpha=0.4, linewidth=0.8)
+                normal_vals.append(norm_val)
+                tumor_vals.append(tumor_val)
+
+        if tumor_vals and normal_vals:
+            stat, p = wilcoxon(tumor_vals, normal_vals, alternative='two-sided')
+            star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
+        else:
+            p, star = np.nan, 'ns'
+
+        ymax = df['pct_detected'].max()
+        ax.text(0.5, ymax * 0.85, star, ha='center', va='bottom', fontsize=32)
+
+        ax.set_title(gene)
+        ax.set_xticks(range(len(order)))
+        ax.set_xticklabels(['Normal\nAdjacent', 'Primary\nTumor'])
+        ax.set_xlabel('')
+        ax.set_ylabel('% cells detected' if ax == axes[0] else '')
+        ax.spines[['top', 'right']].set_visible(False)
+
+        stats_list.append({'Gene': gene, 'n_pairs': len(tumor_vals), 'Wilcoxon_p': p})
+
+    for ax in axes[len(genes):]:
+        ax.set_visible(False)
+
+    plt.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f'Saved → {save_path}')
+    plt.show()
+
+    if return_stats:
+        return pd.DataFrame(stats_list)
+
+
+def plot_genes_pct_expressing_luad(
+    adata,
+    genes,
+    palette=('tab:grey', 'tab:red'),
+    celltype='Epithelial cell',
+    figsize_per_gene=(6, 5),
+    nrows=1,
+    test_mode='nonparametric',
+    return_stats=False,
+    title='',
+    save_path=None,
+):
+    """
+    Plot the percent of cells per donor expressing each gene (expression > 0),
+    comparing normal adjacent vs primary tumor in paired LUAD donors.
+
+    Complements plot_genes_paired_luad — percent detection is robust to
+    zero-inflation and captures presence/absence signal independently of
+    mean expression magnitude.
+
+    Supports any cell type in ann_coarse. For epithelial cells, tumor cells
+    are restricted to ann_fine == 'Cancer cells'. For all other cell types,
+    all cells of that type in tumor_primary are included.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Atlas object. Subsetting to celltype and LUAD is performed internally.
+    genes : list of str
+        Gene symbols to plot (matched via var['feature_name']).
+    palette : tuple
+        Colors for (normal, tumor).
+    celltype : str
+        ann_coarse label to subset to.
+    figsize_per_gene : tuple
+        (width, height) per panel.
+    nrows : int
+        Number of rows in the figure grid.
+    test_mode : str
+        'nonparametric' — Wilcoxon signed-rank (default, recommended).
+        'parametric'    — paired t-test.
+        'auto'          — Shapiro-Wilk normality test per gene, then select.
+    return_stats : bool
+        If True, return a DataFrame of per-gene statistics.
+    title : str
+        Optional figure-level title.
+    save_path : Path or str
+        If provided, save figure to this path.
+    """
+    from scipy.stats import shapiro, wilcoxon, ttest_rel
+
+    sub = adata[
+        (adata.obs['ann_coarse'] == celltype) &
+        (adata.obs['disease'].astype(str).str.lower().str.replace('_', ' ')
+         == 'lung adenocarcinoma')
+    ].copy()
+    sub.obs['origin']   = sub.obs['origin'].astype(str).str.strip().str.lower()
+    sub.obs['ann_fine'] = sub.obs['ann_fine'].astype(str).str.strip().str.lower()
+
+    normal_cells = sub[sub.obs['origin'] == 'normal_adjacent'].copy()
+
+    if 'epithelial' in celltype.lower():
+        tumor_cells = sub[
+            (sub.obs['origin'] == 'tumor_primary') &
+            (sub.obs['ann_fine'] == 'cancer cells')
+        ].copy()
+    else:
+        tumor_cells = sub[sub.obs['origin'] == 'tumor_primary'].copy()
+
+    sub = ad.concat([normal_cells, tumor_cells], axis=0, merge='same')
+
+    ncols     = int(np.ceil(len(genes) / nrows))
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols,
+        figsize=(figsize_per_gene[0] * ncols, figsize_per_gene[1] * nrows),
+        sharey=False,
+    )
+    axes = np.ravel(axes)
+
+    stats_list = []
+
+    for ax, gene in zip(axes, genes):
+        try:
+            gene_id = sub.var.loc[sub.var['feature_name'] == gene].index[0]
+        except IndexError:
+            print(f'{gene} not found in var["feature_name"] — skipping')
+            ax.axis('off')
+            continue
+
+        x = sub[:, gene_id].X
+        x = x.toarray().ravel() if hasattr(x, 'toarray') else np.asarray(x).ravel()
+
+        # fraction of cells per donor with any detected expression
+        df = (
+            pd.DataFrame({
+                'donor_id': sub.obs['donor_id'].astype(str).values,
+                'origin':   sub.obs['origin'].values,
+                'detected': (x > 0).astype(float),
+            })
+            .groupby(['donor_id', 'origin'], observed=True)['detected']
+            .mean()
+            .mul(100.0)
+            .reset_index()
+            .rename(columns={'detected': 'pct_detected'})
+        )
+
+        donor_counts  = df.groupby('donor_id')['origin'].nunique()
+        paired_donors = donor_counts[donor_counts == 2].index
+        df = df[df['donor_id'].isin(paired_donors)]
+        if df.empty:
+            print(f'No paired donors for {gene} — skipping')
+            ax.axis('off')
+            continue
+
+        order = ['normal_adjacent', 'tumor_primary']
+
+        sns.violinplot(
+            data=df, x='origin', y='pct_detected', hue='origin',
+            order=order, palette=palette,
+            inner=None, linewidth=1.2, cut=0, fill=False,
+            ax=ax, legend=False,
+        )
+        sns.stripplot(
+            data=df, x='origin', y='pct_detected', hue='origin',
+            order=order, palette=palette,
+            dodge=False, size=6, alpha=0.7,
+            ax=ax, legend=False,
+        )
+
+        normal_vals, tumor_vals = [], []
+        for did, vals in df.groupby('donor_id'):
+            norm_val  = vals.loc[vals['origin'] == 'normal_adjacent', 'pct_detected'].values[0]
+            tumor_val = vals.loc[vals['origin'] == 'tumor_primary',   'pct_detected'].values[0]
+            ax.plot([0, 1], [norm_val, tumor_val], color='gray', alpha=0.4, linewidth=0.8)
+            normal_vals.append(norm_val)
+            tumor_vals.append(tumor_val)
+
+        diff   = np.array(tumor_vals) - np.array(normal_vals)
+        p_norm = np.nan
+
+        if test_mode == 'auto':
+            if len(diff) >= 3:
+                _, p_norm = shapiro(diff)
+            if np.isnan(p_norm) or p_norm <= 0.05:
+                test_name, (stat, p) = 'Wilcoxon', wilcoxon(tumor_vals, normal_vals)
+            else:
+                test_name, (stat, p) = 'Paired t-test', ttest_rel(tumor_vals, normal_vals)
+        elif test_mode == 'parametric':
+            test_name, (stat, p) = 'Paired t-test', ttest_rel(tumor_vals, normal_vals)
+        elif test_mode == 'nonparametric':
+            test_name, (stat, p) = 'Wilcoxon', wilcoxon(tumor_vals, normal_vals)
+        else:
+            raise ValueError("test_mode must be 'auto', 'parametric', or 'nonparametric'")
+
+        star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
+        ymax  = df['pct_detected'].max()
+        yoff  = (df['pct_detected'].max() - df['pct_detected'].min()) * 0.15
+        ax.text(0.5, ymax + yoff, star, ha='center', va='bottom',
+                fontsize=28, fontweight='bold')
+        ax.set_ylim(top=ymax + yoff * 2)
+        ax.set_title(gene)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(['Normal\nAdjacent', 'Primary\nTumor'])
+        ax.set_xlabel('')
+        ax.set_ylabel('% cells expressing' if ax == axes[0] else '')
+        ax.spines[['top', 'right']].set_visible(False)
+
+        stats_list.append({
+            'Gene':        gene,
+            'n_pairs':     len(diff),
+            'Normality_p': p_norm,
+            'Test':        test_name,
+            'Stat':        stat,
+            'p_value':     p,
+        })
+
+    for ax in axes[len(genes):]:
+        ax.set_visible(False)
+
+    if title:
+        fig.suptitle(title, fontsize=24, fontweight='bold', y=1.03)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f'Saved → {save_path}')
+    plt.show()
+
+    if return_stats:
+        return pd.DataFrame(stats_list)
+
+def plot_celltype_comparison_luad(
+    adata,
+    genes,
+    tissue='tumor_primary',
+    celltypes=('Epithelial cell', 'Macrophage/Monocyte'),
+    palette=('#9DD9D2', '#D44D5C'),
+    figsize_per_gene=(6, 5),
+    nrows=1,
+    test_mode='nonparametric',
+    return_stats=False,
+    title='',
+    save_path=None,
+):
+    """
+    Compare gene expression between two cell types within the same tissue
+    region (e.g. epithelial vs macrophage in primary tumor or NAT).
+
+    Donors are paired — only donors with both cell types represented in the
+    specified tissue are included. Useful for showing that MHC II expression
+    in malignant epithelial cells is comparable to professional APCs.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Atlas object containing LUAD cells.
+    genes : list of str
+        Gene symbols to plot (matched via var['feature_name']).
+    tissue : str
+        Origin value to filter to ('tumor_primary' or 'normal_adjacent').
+    celltypes : tuple of str
+        Two ann_coarse labels to compare.
+    palette : tuple or str
+        Colors for each cell type, or a seaborn palette name.
+    figsize_per_gene : tuple
+        (width, height) per panel.
+    nrows : int
+        Number of rows in the figure grid.
+    test_mode : str
+        'nonparametric' — Wilcoxon signed-rank (default, recommended).
+        'parametric'    — paired t-test.
+        'auto'          — Shapiro-Wilk normality test per gene, then select.
+    return_stats : bool
+        If True, return a DataFrame of per-gene statistics.
+    title : str
+        Optional figure-level title.
+    save_path : Path or str
+        If provided, save figure to this path.
+    """
+    from scipy.stats import shapiro, wilcoxon, ttest_rel
+
+    # subset to LUAD and specified tissue region
+    sub = adata[
+        (adata.obs['origin'].str.lower() == tissue.lower()) &
+        (adata.obs['disease'].astype(str).str.lower().str.replace('_', ' ')
+         == 'lung adenocarcinoma')
+    ].copy()
+    sub.obs['ann_coarse'] = sub.obs['ann_coarse'].astype(str).str.strip()
+
+    ncols     = int(np.ceil(len(genes) / nrows))
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols,
+        figsize=(figsize_per_gene[0] * ncols, figsize_per_gene[1] * nrows),
+        sharey=False,
+    )
+    axes = np.ravel(axes)
+
+    stats_list = []
+
+    for ax, gene in zip(axes, genes):
+        try:
+            gene_id = sub.var.loc[sub.var['feature_name'] == gene].index[0]
+        except IndexError:
+            print(f'{gene} not found in var["feature_name"] — skipping')
+            ax.axis('off')
+            continue
+
+        x = sub[:, gene_id].X
+        x = x.toarray().ravel() if hasattr(x, 'toarray') else np.asarray(x).ravel()
+
+        df = (
+            pd.DataFrame({
+                'donor_id': sub.obs['donor_id'].astype(str).values,
+                'celltype': sub.obs['ann_coarse'].values,
+                gene:       x,
+            })
+            .loc[lambda d: d['celltype'].isin(celltypes)]
+            .groupby(['donor_id', 'celltype'], observed=True)[gene]
+            .mean()
+            .reset_index()
+        )
+
+        # retain donors with both cell types represented
+        donor_counts  = df.groupby('donor_id')['celltype'].nunique()
+        paired_donors = donor_counts[donor_counts == 2].index
+        df = df[df['donor_id'].isin(paired_donors)]
+        if df.empty:
+            print(f'No paired donors for {gene} — skipping')
+            ax.axis('off')
+            continue
+
+        sns.violinplot(
+            data=df, x='celltype', y=gene, hue='celltype',
+            order=celltypes, palette=palette,
+            inner=None, linewidth=1.2, cut=0, fill=False,
+            ax=ax, legend=False,
+        )
+        sns.stripplot(
+            data=df, x='celltype', y=gene, hue='celltype',
+            order=celltypes, palette=palette,
+            dodge=False, size=7, alpha=0.7,
+            ax=ax, legend=False,
+        )
+
+        vals1, vals2 = [], []
+        for did, vals in df.groupby('donor_id'):
+            v1 = vals.loc[vals['celltype'] == celltypes[0], gene].values[0]
+            v2 = vals.loc[vals['celltype'] == celltypes[1], gene].values[0]
+            ax.plot([0, 1], [v1, v2], color='gray', alpha=0.4, linewidth=0.8)
+            vals1.append(v1)
+            vals2.append(v2)
+
+        diff   = np.array(vals2) - np.array(vals1)
+        p_norm = np.nan
+
+        if test_mode == 'auto':
+            if len(diff) >= 3:
+                _, p_norm = shapiro(diff)
+            if np.isnan(p_norm) or p_norm <= 0.05:
+                test_name, (stat, p) = 'Wilcoxon', wilcoxon(vals2, vals1)
+            else:
+                test_name, (stat, p) = 'Paired t-test', ttest_rel(vals2, vals1)
+        elif test_mode == 'parametric':
+            test_name, (stat, p) = 'Paired t-test', ttest_rel(vals2, vals1)
+        elif test_mode == 'nonparametric':
+            test_name, (stat, p) = 'Wilcoxon', wilcoxon(vals2, vals1)
+        else:
+            raise ValueError("test_mode must be 'auto', 'parametric', or 'nonparametric'")
+
+        star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
+        ymax  = df[gene].max()
+        yoff  = (df[gene].max() - df[gene].min()) * 0.2
+        ax.text(0.5, ymax + yoff, star, ha='center', va='bottom', fontsize=26)
+        ax.set_ylim(top=ymax + yoff * 2)
+        ax.set_title(f'{gene} ({tissue})')
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(list(celltypes))
+        ax.set_xlabel('')
+        ax.set_ylabel('Mean expression' if ax == axes[0] else '')
+        ax.spines[['top', 'right']].set_visible(False)
+
+        stats_list.append({
+            'Gene':        gene,
+            'tissue':      tissue,
+            'n_pairs':     len(diff),
+            'Test':        test_name,
+            'Stat':        stat,
+            'p_value':     p,
+            'Normality_p': p_norm,
+        })
+
+    for ax in axes[len(genes):]:
+        ax.set_visible(False)
+
+    if title:
+        fig.suptitle(title, fontsize=24, fontweight='bold', y=1.03)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f'Saved → {save_path}')
+    plt.show()
+
+    if return_stats:
+        return pd.DataFrame(stats_list)
+
+
+def plot_ciita_s100p_paired(wide, figsize=(8, 3.8), dpi=150):
+    """
+    Two-panel paired dot + delta figure comparing CIITA expression in S100P+
+    vs S100P- epithelial cells, separately for normal adjacent and tumor.
+
+    Left panel of each pair: per-sample paired dot plot (S100P- vs S100P+).
+    Right panel: within-sample delta (S100P+ minus S100P-) with Wilcoxon test.
+
+    Parameters
+    ----------
+    wide : pd.DataFrame
+        Output of ciita_expr_by_s100p_strata_per_sample.
+    figsize : tuple
+        Figure dimensions in inches.
+    dpi : int
+        Figure resolution.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    """
+    origins = ['normal_adjacent', 'tumor_primary']
+    labels  = ['Normal adjacent', 'Tumor']
+
+    COLOR_NEG  = '#C4A882'
+    COLOR_POS  = '#7B2D8B'
+    ALPHA_LINE = 0.35
+    DOT_SIZE   = 4
+
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    gs  = fig.add_gridspec(
+        1, 5,
+        width_ratios=[1.6, 0.85, 0.25, 1.6, 0.85],
+        left=0.08, right=0.97, top=0.85, bottom=0.15,
+        wspace=0.08,
+    )
+    ax_slots = [
+        fig.add_subplot(gs[0, 0]),
+        fig.add_subplot(gs[0, 1]),
+        fig.add_subplot(gs[0, 3]),
+        fig.add_subplot(gs[0, 4]),
+    ]
+
+    for i, (origin, label) in enumerate(zip(origins, labels)):
+        ax_paired = ax_slots[i * 2]
+        ax_delta  = ax_slots[i * 2 + 1]
+
+        sub = wide[wide['origin'] == origin].dropna(
+            subset=['CIITA_mean_S100Pneg', 'CIITA_mean_S100Ppos', 'delta_pos_minus_neg']
+        )
+        deltas   = sub['delta_pos_minus_neg'].values
+        stat, p  = wilcoxon(deltas)
+        s        = sig_label(p)
+        med      = np.median(deltas)
+
+        # paired dot plot
+        rng    = np.random.default_rng(42 + i)
+        jitter = rng.uniform(-0.08, 0.08, len(sub))
+
+        for xn, xp, yn, yp in zip(
+            jitter, 1 + jitter,
+            sub['CIITA_mean_S100Pneg'],
+            sub['CIITA_mean_S100Ppos'],
+        ):
+            ax_paired.plot([xn, xp], [yn, yp],
+                           color='grey', lw=0.6, alpha=ALPHA_LINE, zorder=1)
+
+        ax_paired.scatter(jitter,     sub['CIITA_mean_S100Pneg'],
+                          color=COLOR_NEG, s=DOT_SIZE, zorder=3)
+        ax_paired.scatter(1 + jitter, sub['CIITA_mean_S100Ppos'],
+                          color=COLOR_POS, s=DOT_SIZE, zorder=3)
+
+        ax_paired.set_xticks([0, 1])
+        ax_paired.set_xticklabels(['S100P-', 'S100P+'], fontsize=8)
+        ax_paired.set_xlim(-0.4, 1.4)
+        ax_paired.set_ylabel('Mean CIITA (CIITA+ cells)', fontsize=7.5)
+        ax_paired.set_title(label, fontsize=9, fontweight='bold', pad=6)
+        ax_paired.spines[['top', 'right']].set_visible(False)
+        ax_paired.tick_params(labelsize=7)
+
+        # delta strip plot
+        rng2 = np.random.default_rng(99 + i)
+        jit2 = rng2.uniform(-0.18, 0.18, len(deltas))
+        ymin = min(deltas) - np.ptp(deltas) * 0.08
+        ymax = max(deltas) + np.ptp(deltas) * 0.45
+
+        ax_delta.set_ylim(ymin, ymax)
+        ax_delta.axhline(0, color='black', lw=0.8, ls='--', zorder=1)
+        ax_delta.scatter(jit2, deltas, color=COLOR_POS, s=DOT_SIZE, alpha=0.75, zorder=3)
+        ax_delta.plot([-0.25, 0.25], [med, med], color='black', lw=2, zorder=4)
+
+        ax_delta.text(0.5, 0.97, f'{s}  p={p:.2e}',
+                      ha='center', va='top', fontsize=6.5,
+                      transform=ax_delta.transAxes)
+        ax_delta.text(0.5, 0.02, f'n={len(sub)}',
+                      ha='center', va='bottom', fontsize=6.5, color='grey',
+                      transform=ax_delta.transAxes)
+
+        ax_delta.set_xlim(-0.5, 0.5)
+        ax_delta.set_xticks([])
+        ax_delta.set_ylabel('')
+        ax_delta.spines[['top', 'right', 'bottom', 'left']].set_visible(False)
+        ax_delta.tick_params(axis='y', labelsize=7, left=False, labelleft=False)
+
+    fig.suptitle('CIITA expression in S100P+ vs S100P- epithelial cells',
+                 fontsize=9, y=0.97)
     return fig
