@@ -1439,3 +1439,154 @@ def plot_ciita_s100p_paired(wide, figsize=(8, 3.8), dpi=150):
     fig.suptitle('CIITA expression in S100P+ vs S100P- epithelial cells',
                  fontsize=9, y=0.97)
     return fig
+
+
+def plot_dual_metric_panel(
+    adata,
+    genes_dict,
+    cell_types,
+    group_col='MHC2_clustering',
+    group_order=['MHC class II High', 'MHC class II Low'],
+    palette={'MHC class II High': '#FF8811FF', 'MHC class II Low': '#462255FF'},
+    fig_path=None,
+    title=None,
+):
+    """
+    Plot percent expressing and mean expression (among positive cells)
+    side by side for each gene × cell type combination.
+
+    Parameters
+    ----------
+    adata : AnnData
+    genes_dict : dict
+        {gene_symbol: [ensembl_id, ...]}
+    cell_types : list of str
+    group_col : str
+    group_order : list of str
+    palette : dict
+    fig_path : Path or None
+    title : str or None
+
+    Returns
+    -------
+    stats_df : pd.DataFrame
+    """
+    gene_list = list(genes_dict.keys())
+    stats_records = []
+    pct_data  = {}
+    mean_data = {}
+
+    for cell_type in cell_types:
+        subset = adata[adata.obs['cell_type_major'] == cell_type]
+        pct_data[cell_type]  = {}
+        mean_data[cell_type] = {}
+
+        for gene, gene_ens_list in genes_dict.items():
+            gene_ens = gene_ens_list[0]
+            x = subset.to_df()[gene_ens]
+            expr = x.to_frame(name='expr')
+            expr['sample']  = subset.obs['sample'].values
+            expr['cluster'] = subset.obs[group_col].values
+
+            # % expressing
+            pct_df = (
+                (expr.assign(detected=(expr['expr'] > 0).astype(int))
+                 .groupby(['sample', 'cluster'], observed=True)['detected']
+                 .mean() * 100)
+                .reset_index()
+                .rename(columns={'detected': 'expr'})
+            )
+            pct_data[cell_type][gene] = pct_df
+
+            # mean among positive cells
+            mean_df = (
+                expr[expr['expr'] > 0]
+                .groupby(['sample', 'cluster'], observed=True)['expr']
+                .mean()
+                .reset_index()
+            )
+            mean_data[cell_type][gene] = mean_df
+
+            # stats — run on % expressing
+            g1 = pct_df.loc[pct_df['cluster'] == group_order[0], 'expr']
+            g2 = pct_df.loc[pct_df['cluster'] == group_order[1], 'expr']
+            p  = mannwhitneyu(g1, g2, alternative='two-sided')[1] if len(g1) > 0 and len(g2) > 0 else np.nan
+            stats_records.append({'cell_type': cell_type, 'gene': gene, 'p_value': p})
+
+    stats_df = pd.DataFrame(stats_records)
+    _, fdr, _, _ = multipletests(stats_df['p_value'].fillna(1), method='fdr_bh')
+    stats_df['FDR_p']     = fdr
+    stats_df['sig_label'] = stats_df['FDR_p'].apply(
+        lambda p: '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else ''
+    )
+
+    # figure — 2 columns per gene (pct + mean), rows = cell types
+    nrows = len(cell_types)
+    ncols = len(gene_list) * 2
+
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(3 * ncols, 4 * nrows),
+                             sharey=False)
+    axes = np.atleast_2d(axes)
+
+    for r, cell_type in enumerate(cell_types):
+        for c_gene, gene in enumerate(gene_list):
+            for c_metric, (metric_label, data) in enumerate([
+                ('% expressing', pct_data[cell_type][gene]),
+                ('mean expr\n(pos cells)', mean_data[cell_type][gene]),
+            ]):
+                col = c_gene * 2 + c_metric
+                ax  = axes[r, col]
+
+                sns.boxplot(
+                    data=data, x='cluster', y='expr', hue='cluster',
+                    order=group_order, palette=palette,
+                    ax=ax, fill=False, showfliers=False, legend=False,
+                )
+                sns.stripplot(
+                    data=data, x='cluster', y='expr', hue='cluster',
+                    order=group_order, palette=palette,
+                    ax=ax, edgecolor='k', linewidth=1,
+                    size=3, alpha=0.6, legend=False,
+                )
+
+                if r == 0:
+                    ax.set_title(f'{gene}\n{metric_label}', fontsize=14, pad=10)
+                if c_gene == 0 and c_metric == 0:
+                    ax.set_ylabel(cell_type, fontsize=14)
+                else:
+                    ax.set_ylabel('')
+
+                ax.set_xlabel('')
+                ax.set_xticklabels([])
+                ax.spines[['top', 'right']].set_visible(False)
+
+                # significance on % expressing column only
+                if c_metric == 0:
+                    sig = stats_df.loc[
+                        (stats_df['cell_type'] == cell_type) &
+                        (stats_df['gene'] == gene), 'sig_label'
+                    ].values[0]
+                    if sig:
+                        ax.text(0.5, 0.78, sig, ha='center', va='bottom',
+                                transform=ax.transAxes, fontsize=36)
+
+    handles = [
+        plt.Line2D([0], [0], color=palette[g], marker='o', linestyle='',
+                   markersize=8, markeredgecolor='k', markeredgewidth=1, label=g)
+        for g in group_order
+    ]
+    fig.legend(handles=handles, loc='upper center', ncol=2,
+               frameon=False, bbox_to_anchor=(0.5, 1.02), fontsize=14)
+
+    if title:
+        fig.suptitle(title, fontsize=16, y=1.05)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+    if fig_path:
+        plt.savefig(fig_path, bbox_inches='tight')
+
+    plt.show()
+    return stats_df
+    
