@@ -28,7 +28,7 @@ import seaborn as sns
 from scipy.stats import mannwhitneyu
 from matplotlib.lines import Line2D
 from scipy.stats import mannwhitneyu, wilcoxon
-
+from statsmodels.stats.multitest import multipletests
 
 def sig_label(p):
     """
@@ -1448,6 +1448,7 @@ def plot_dual_metric_panel(
     group_col='MHC2_clustering',
     group_order=['MHC class II High', 'MHC class II Low'],
     palette={'MHC class II High': '#FF8811FF', 'MHC class II Low': '#462255FF'},
+    cell_type_col='cell_type_major',   # ← add this
     fig_path=None,
     title=None,
 ):
@@ -1477,7 +1478,7 @@ def plot_dual_metric_panel(
     mean_data = {}
 
     for cell_type in cell_types:
-        subset = adata[adata.obs['cell_type_major'] == cell_type]
+        subset = adata[adata.obs[cell_type_col] == cell_type]
         pct_data[cell_type]  = {}
         mean_data[cell_type] = {}
 
@@ -1511,7 +1512,7 @@ def plot_dual_metric_panel(
             g1 = pct_df.loc[pct_df['cluster'] == group_order[0], 'expr']
             g2 = pct_df.loc[pct_df['cluster'] == group_order[1], 'expr']
             p  = mannwhitneyu(g1, g2, alternative='two-sided')[1] if len(g1) > 0 and len(g2) > 0 else np.nan
-            stats_records.append({'cell_type': cell_type, 'gene': gene, 'p_value': p})
+            stats_records.append({'cell_type': cell_type, 'gene': gene, 'p_value': p, 'mean_high': float(g1.mean()),'mean_low':  float(g2.mean()),})
 
     stats_df = pd.DataFrame(stats_records)
     _, fdr, _, _ = multipletests(stats_df['p_value'].fillna(1), method='fdr_bh')
